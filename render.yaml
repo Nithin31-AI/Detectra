@@ -1,0 +1,148 @@
+services:
+  # ---------------------------------------------------------------------------
+  # 1. FastAPI REST API Backend Service
+  # ---------------------------------------------------------------------------
+  - type: web
+    name: sih-backend
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    plan: starter
+    healthCheckPath: /health
+    envVars:
+      - key: PORT
+        value: 10000
+      - key: POSTGRES_DSN
+        fromDatabase:
+          name: nexus_ai
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: sih-redis
+          property: connectionString
+      - key: NEO4J_URI
+        value: bolt://sih-neo4j:7687
+      - key: NEO4J_USER
+        value: neo4j
+      - key: NEO4J_PASSWORD
+        value: change-me
+      - key: QDRANT_URL
+        value: http://sih-qdrant:6333
+      - key: CELERY_BROKER_URL
+        fromService:
+          type: redis
+          name: sih-redis
+          property: connectionString
+      - key: CELERY_RESULT_BACKEND
+        fromService:
+          type: redis
+          name: sih-redis
+          property: connectionString
+      - key: CORS_ORIGINS
+        value: '["https://sih-frontend.onrender.com", "http://localhost:5173"]'
+
+  # ---------------------------------------------------------------------------
+  # 2. Celery Asynchronous Task Worker
+  # ---------------------------------------------------------------------------
+  - type: worker
+    name: sih-celery-worker
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    dockerCommand: celery -A app.worker worker -Q celery,evidence,graph --loglevel=INFO
+    plan: starter
+    envVars:
+      - key: POSTGRES_DSN
+        fromDatabase:
+          name: nexus_ai
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: sih-redis
+          property: connectionString
+      - key: NEO4J_URI
+        value: bolt://sih-neo4j:7687
+      - key: NEO4J_USER
+        value: neo4j
+      - key: NEO4J_PASSWORD
+        value: change-me
+      - key: QDRANT_URL
+        value: http://sih-qdrant:6333
+      - key: CELERY_BROKER_URL
+        fromService:
+          type: redis
+          name: sih-redis
+          property: connectionString
+      - key: CELERY_RESULT_BACKEND
+        fromService:
+          type: redis
+          name: sih-redis
+          property: connectionString
+
+  # ---------------------------------------------------------------------------
+  # 3. Neo4j Graph Database (Private Service with Render Persistent Disk)
+  # ---------------------------------------------------------------------------
+  - type: pserv
+    name: sih-neo4j
+    runtime: image
+    image:
+      url: neo4j:5-community
+    plan: starter
+    disk:
+      name: neo4j-data
+      mountPath: /data
+      sizeGB: 10
+    envVars:
+      - key: NEO4J_AUTH
+        value: neo4j/change-me
+      - key: NEO4J_PLUGINS
+        value: '["apoc"]'
+
+  # ---------------------------------------------------------------------------
+  # 4. Qdrant Vector Database (Private Service with Render Persistent Disk)
+  # ---------------------------------------------------------------------------
+  - type: pserv
+    name: sih-qdrant
+    runtime: image
+    image:
+      url: qdrant/qdrant:latest
+    plan: starter
+    disk:
+      name: qdrant-data
+      mountPath: /qdrant/storage
+      sizeGB: 10
+
+  # ---------------------------------------------------------------------------
+  # 5. Render Managed Redis Instance
+  # ---------------------------------------------------------------------------
+  - type: redis
+    name: sih-redis
+    plan: starter
+    maxMemoryPolicy: allkeys-lru
+    ipAllowList: []
+
+  # ---------------------------------------------------------------------------
+  # 6. React 19 Frontend Web Service (SPA)
+  # ---------------------------------------------------------------------------
+  - type: web
+    name: sih-frontend
+    runtime: docker
+    dockerfilePath: ./nexus-crime-ai-frontend/Dockerfile
+    dockerContext: ./nexus-crime-ai-frontend
+    plan: starter
+    envVars:
+      - key: PORT
+        value: 80
+      - key: VITE_API_BASE_URL
+        value: https://sih-backend.onrender.com/api/v1
+
+# -----------------------------------------------------------------------------
+# 7. Render Managed PostgreSQL Database
+# -----------------------------------------------------------------------------
+databases:
+  - name: nexus_ai
+    databaseName: nexus
+    user: nexus
+    plan: starter
